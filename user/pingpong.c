@@ -6,21 +6,26 @@
 int
 main(int argc, char* argv[]){
 
-    int child_pid;
+    int pid;
+    char buf[] = "y";
     int pipe1[2], pipe2[2];
     pipe(pipe1);
     pipe(pipe2);
 
-    child_pid = fork();
-    if(child_pid == 0){//child
+    if(fork() == 0){//child
         close(pipe1[0]);
         close(pipe2[1]);
 
-        char buf[1];
-        int pid = getpid();
-        read(pipe2[0], buf, 1);
+        pid = getpid();
+        if(read(pipe2[0], buf, 1) != 1){
+            fprintf(2, "failed to read in child\n");
+            exit(1);
+        };
         fprintf(1, "%d: received ping\n", pid);
-        write(pipe1[1], buf, 1);
+        if(write(pipe1[1], buf, 1) != 1){
+            fprintf(2, "failed to write in child\n");
+            exit(1);
+        };
 
         close(pipe1[1]);
         close(pipe2[0]);
@@ -31,12 +36,15 @@ main(int argc, char* argv[]){
         close(pipe1[1]);
         close(pipe2[0]);
 
-        char buf[2] = "y";
-        int pid = getpid();
-
-        write(pipe2[1], buf, 1);
-        read(pipe1[0], buf, 1);
-        buf[2] = 0;
+        pid = getpid();
+        if(write(pipe2[1], buf, 1) != 1){
+            fprintf(2, "failed to write in parent\n");
+            exit(1);
+        };
+        if(read(pipe1[0], buf, 1) != 1){
+            fprintf(2, "failed to read in parent\n");
+            exit(1);
+        }
         fprintf(1, "%d: received pong\n", pid);
 
         close(pipe1[0]);
