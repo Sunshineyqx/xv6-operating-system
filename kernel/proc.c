@@ -127,6 +127,8 @@ found:
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
 
+  //a new process default has no tracing syscall
+  p->tracemask = 0;
   return p;
 }
 
@@ -150,6 +152,7 @@ freeproc(struct proc *p)
   p->killed = 0;
   p->xstate = 0;
   p->state = UNUSED;
+  p->tracemask = 0;
 }
 
 // Create a user page table for a given process,
@@ -276,7 +279,8 @@ fork(void)
   np->sz = p->sz;
 
   np->parent = p;
-
+  //继承父进程跟踪的syscalls
+  np->tracemask = p->tracemask;
   // copy saved user registers.
   *(np->trapframe) = *(p->trapframe);
 

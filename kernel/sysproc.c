@@ -95,3 +95,14 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
+
+// trace the syscalls and print the pid, 
+//the name of syscall and return value;
+//return 0 for success and -1 for error;
+uint64
+ sys_trace(void){
+   int bit_mask;
+   if(argint(0, &bit_mask) < 0) return -1;
+   myproc()->tracemask |= bit_mask;
+   return 0;
+ }
