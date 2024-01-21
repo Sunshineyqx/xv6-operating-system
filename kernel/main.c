@@ -22,7 +22,7 @@ main()
     kinit();         // physical page allocator
     kvminit();       // create kernel page table
     kvminithart();   // turn on paging
-    procinit();      // process table
+    procinit();      // process table  <-----在allocproc()中完成内核栈分配映射的功能
     trapinit();      // trap vectors
     trapinithart();  // install kernel trap vector
     plicinit();      // set up interrupt controller

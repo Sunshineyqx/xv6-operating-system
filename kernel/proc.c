@@ -6,6 +6,8 @@
 #include "proc.h"
 #include "defs.h"
 
+extern char etext[]; 
+
 struct cpu cpus[NCPU];
 
 struct proc proc[NPROC];
@@ -127,6 +129,22 @@ found:
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
 
+  //allocate a kernel page table which have completed kernel mapping (except kernel stack).
+  p->kpagetable = ukvminit();
+  if(p->kpagetable == 0){
+    freeproc(p);
+    release(&p->lock);
+    return 0;
+  }
+  
+  //complete the process's kernel page table's 
+  //kernel stack mapping.  (进程的内核栈已经有了物理页面)
+  uint64 va = KSTACK((int) (p - proc));
+  uint64 pa = kvmpa(va);
+  memset((void *)pa, 0, PGSIZE);
+  ukvmmap(p->kpagetable, va, pa, PGSIZE, (PTE_R | PTE_W));
+  p->kstack = va;
+
   return p;
 }
 
@@ -150,6 +168,13 @@ freeproc(struct proc *p)
   p->killed = 0;
   p->xstate = 0;
   p->state = UNUSED;
+  //释放内核页表，选择性地释放叶节点页表项对应的物理页面
+  if(p->kpagetable){
+    proc_freekpagetable(p);
+    p->kpagetable = 0;
+  }
+
+
 }
 
 // Create a user page table for a given process,
@@ -193,6 +218,23 @@ proc_freepagetable(pagetable_t pagetable, uint64 sz)
   uvmunmap(pagetable, TRAMPOLINE, 1, 0);
   uvmunmap(pagetable, TRAPFRAME, 1, 0);
   uvmfree(pagetable, sz);
+}
+
+//释放进程的内核页表，但不释放对应的物理内存
+void
+proc_freekpagetable(struct proc* p){
+
+  pagetable_t kpagetable = p->kpagetable;
+  ukvmunmap(kpagetable, p->kstack, PGSIZE/PGSIZE);
+  ukvmunmap(kpagetable, TRAMPOLINE, PGSIZE/PGSIZE);
+  ukvmunmap(kpagetable, (uint64)etext, (PHYSTOP-(uint64)etext)/PGSIZE);
+  ukvmunmap(kpagetable, KERNBASE, ((uint64)etext-KERNBASE)/PGSIZE);
+  ukvmunmap(kpagetable, PLIC, 0x400000/PGSIZE);
+  ukvmunmap(kpagetable, CLINT, 0x10000/PGSIZE);
+  ukvmunmap(kpagetable, VIRTIO0, PGSIZE/PGSIZE);
+  ukvmunmap(kpagetable, UART0, PGSIZE/PGSIZE);
+
+  ukfreewalk(kpagetable);
 }
 
 // a user program that calls exec("/init")
@@ -473,9 +515,17 @@ scheduler(void)
         // before jumping back to us.
         p->state = RUNNING;
         c->proc = p;
+
+        //修改寄存器，切换到新进程的内核页表
+        w_satp(MAKE_SATP(p->kpagetable));
+        sfence_vma();
+
+        //执行进程...
         swtch(&c->context, &p->context);
 
         // Process is done running for now.
+        // 修改寄存器，切换到内核页表
+        kvminithart();
         // It should have changed its p->state before coming back.
         c->proc = 0;
 

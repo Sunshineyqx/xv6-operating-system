@@ -471,3 +471,78 @@ vmprint(pagetable_t pagetable){
   printf("page table %p\n", pagetable);
   vmprint_helper(pagetable, 1);
 }
+
+// add a mapping to the process's kernel page table.
+// does not flush TLB or enable paging.
+void
+ukvmmap(pagetable_t proc_kpagetable,uint64 va, uint64 pa, uint64 sz, int perm)
+{
+  if(mappages(proc_kpagetable, va, sz, pa, perm) != 0)
+    panic("ukvmmap: 映射进程内核页表错误");
+}
+/*
+ * create a direct-map page table for the process's kernel page table.
+ *return 0 if kalloc() error.
+ */
+pagetable_t
+ukvminit()
+{
+  pagetable_t proc_kpagetable = (pagetable_t) kalloc();
+  if(proc_kpagetable == 0) return 0;
+
+  memset(proc_kpagetable, 0, PGSIZE);
+
+  // uart registers
+  ukvmmap(proc_kpagetable, UART0, UART0, PGSIZE, PTE_R | PTE_W);
+  // virtio mmio disk interface
+  ukvmmap(proc_kpagetable, VIRTIO0, VIRTIO0, PGSIZE, PTE_R | PTE_W);
+  // CLINT
+  ukvmmap(proc_kpagetable, CLINT, CLINT, 0x10000, PTE_R | PTE_W);
+  // PLIC
+  ukvmmap(proc_kpagetable, PLIC, PLIC, 0x400000, PTE_R | PTE_W);
+  // map kernel text executable and read-only.
+  ukvmmap(proc_kpagetable, KERNBASE, KERNBASE, (uint64)etext-KERNBASE, PTE_R | PTE_X);
+  // map kernel data and the physical RAM we'll make use of.
+  ukvmmap(proc_kpagetable, (uint64)etext, (uint64)etext, PHYSTOP-(uint64)etext, PTE_R | PTE_W);
+  // map the trampoline for trap entry/exit to
+  // the highest virtual address in the kernel.
+  ukvmmap(proc_kpagetable, TRAMPOLINE, (uint64)trampoline, PGSIZE, PTE_R | PTE_X);
+  
+  return proc_kpagetable;
+}
+
+/*用于对进程的内核页表的叶子节点取消映射
+*/
+void
+ukvmunmap(pagetable_t proc_kpagetable, uint64 va, uint64 npages){
+  uint64 a;
+  pte_t *pte;
+
+  if((va % PGSIZE) != 0)
+    panic("ukvmunmap: not aligned");
+
+  for(a = va; a < va + npages*PGSIZE; a += PGSIZE){
+      pte = walk(proc_kpagetable, a, 0);
+      if(PTE_FLAGS(*pte) == PTE_V)
+          panic("ukvmunmap: not a leaf");
+      *pte = 0;
+  }
+}
+
+//释放进程的内核页表
+void
+ukfreewalk(pagetable_t pagetable){
+  if(pagetable == 0) return;
+    // there are 2^9 = 512 PTEs in a page table.
+  for(int i = 0; i < 512; i++){
+    pte_t pte = pagetable[i];
+    if((pte & PTE_V) && (pte & (PTE_R|PTE_W|PTE_X)) == 0){
+      // this PTE points to a lower-level page table.
+      uint64 child = PTE2PA(pte);
+      ukfreewalk((pagetable_t)child);
+      pagetable[i] = 0;
+    }
+    pagetable[i] = 0;
+  }
+  kfree((void*)pagetable);
+}
