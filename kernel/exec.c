@@ -116,6 +116,17 @@ exec(char *path, char **argv)
   p->trapframe->sp = sp; // initial stack pointer
   proc_freepagetable(oldpagetable, oldsz);
 
+  //先取消映射进程内核页表的进程部分
+  //uvmreunmap(p->kpagetable, 0, PGROUNDUP(p->sz)/PGSIZE);
+  //然后复制进程页表到进程内核页表
+  if((pagetablecopy(p->pagetable, p->kpagetable, 0, p->sz)) != 0){
+    goto bad;
+  }
+  //刷新tlb
+  w_satp(MAKE_SATP(p->kpagetable));
+  sfence_vma();
+
+  
   if(p->pid==1) vmprint(p->pagetable); //<-----add
   
   return argc; // this ends up in a0, the first argument to main(argc, argv)

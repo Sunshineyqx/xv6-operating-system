@@ -263,6 +263,9 @@ userinit(void)
   uvminit(p->pagetable, initcode, sizeof(initcode));
   p->sz = PGSIZE;
 
+  //更新进程的内核页表
+  pagetablecopy(p->pagetable, p->kpagetable, 0, p->sz);
+  
   // prepare for the very first "return" from kernel to user.
   p->trapframe->epc = 0;      // user program counter
   p->trapframe->sp = PGSIZE;  // user stack pointer
@@ -285,12 +288,24 @@ growproc(int n)
 
   sz = p->sz;
   if(n > 0){
+    //进程的虚拟内存不能太大
+    if(p->sz +n > PLIC) {
+      return -1;
+    }
     if((sz = uvmalloc(p->pagetable, sz, sz + n)) == 0) {
+      return -1;
+    }
+    //同步扩大进程的内核页表
+    if(pagetablecopy(p->pagetable, p->kpagetable, p->sz, sz) != 0){
       return -1;
     }
   } else if(n < 0){
     sz = uvmdealloc(p->pagetable, sz, sz + n);
+    //同步缩小进程的内核页表
+    (uvmreunmap(p->kpagetable, PGROUNDUP(sz), (PGROUNDUP(p->sz) - PGROUNDUP(sz)) / PGSIZE));
   }
+  //刷新一下tlb。
+  ukvminithart(p->kpagetable);
   p->sz = sz;
   return 0;
 }
@@ -316,6 +331,13 @@ fork(void)
     return -1;
   }
   np->sz = p->sz;
+  
+  //拷贝进程的内核页表(因为内核部分已经在allocproc()时分配完毕，所以只需要copy进程自己的页表到内核页表)
+  if(pagetablecopy(np->pagetable, np->kpagetable, 0, p->sz) != 0){
+    freeproc(np);
+    release(&np->lock);
+    return -1;
+  }
 
   np->parent = p;
 

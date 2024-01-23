@@ -56,6 +56,13 @@ kvminithart()
   sfence_vma();
 }
 
+//
+void
+ukvminithart(pagetable_t pagetable)
+{
+  w_satp(MAKE_SATP(pagetable));
+  sfence_vma();
+}
 // Return the address of the PTE in page table pagetable
 // that corresponds to virtual address va.  If alloc!=0,
 // create any required page-table pages.
@@ -157,7 +164,7 @@ mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
     if((pte = walk(pagetable, a, 1)) == 0)
       return -1;
     if(*pte & PTE_V)
-      panic("remap");
+      panic("mappages: remap");
     *pte = PA2PTE(pa) | perm | PTE_V;
     if(a == last)
       break;
@@ -379,6 +386,7 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 int
 copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
 {
+  return copyin_new(pagetable, dst, srcva, len);
   uint64 n, va0, pa0;
 
   while(len > 0){
@@ -405,6 +413,7 @@ copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
 int
 copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
 {
+  return copyinstr_new(pagetable, dst, srcva, max);
   uint64 n, va0, pa0;
   int got_null = 0;
 
@@ -545,4 +554,64 @@ ukfreewalk(pagetable_t pagetable){
     pagetable[i] = 0;
   }
   kfree((void*)pagetable);
+}
+
+//可以重新取消映射的uvunmap()
+void
+uvmreunmap(pagetable_t pagetable, uint64 va, uint64 npages){
+  uint64 a;
+  pte_t *pte;
+
+  if((va % PGSIZE) != 0)
+    panic("uvmunmap: not aligned");
+
+  for(a = va; a < va + npages*PGSIZE; a += PGSIZE){
+    pte = walk(pagetable, a, 0);
+    if(pte != 0)  *pte = 0;
+  }
+}
+//可以重新映射的mappages
+int
+remappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
+{
+  uint64 a, last;
+  pte_t *pte;
+
+  a = PGROUNDDOWN(va);
+  last = PGROUNDDOWN(va + size - 1);
+  for(;;){
+    if((pte = walk(pagetable, a, 1)) == 0)
+      return -1;
+    *pte = PA2PTE(pa) | perm | PTE_V;
+    if(a == last)
+      break;
+    a += PGSIZE;
+    pa += PGSIZE;
+  }
+  return 0;
+}
+
+/*用来拷贝旧页表到新的页表*/
+int
+pagetablecopy(pagetable_t old_pagetable, pagetable_t new_pagetable, uint64 begin, uint64 end){
+  uint64 a, pa;
+  pte_t* pte;
+  int flags;
+  begin = PGROUNDUP(begin);
+
+  for(a = begin; a < end; a+= PGSIZE){
+    if((pte = walk(old_pagetable, a, 0)) == 0){
+      panic("pagetablecopy: walk oldpage but no mapping");
+    }
+    if(((*pte) & PTE_V) == 0){
+      panic("pagetablecopy: walk oldpage but not valid");
+    }
+    pa = PTE2PA(*pte);
+    flags = PTE_FLAGS(*pte) & (~PTE_U);
+    if(remappages(new_pagetable, a, PGSIZE, pa, flags) != 0){
+      uvmunmap(new_pagetable, 0, (a-begin) / PGSIZE, 1);
+      return -1;
+    }
+  }
+  return 0;
 }

@@ -161,6 +161,7 @@ int             uartgetc(void);
 // vm.c
 void            kvminit(void);
 void            kvminithart(void);
+void  ukvminithart(pagetable_t pagetable);
 uint64          kvmpa(uint64);
 void            kvmmap(uint64, uint64, uint64, int);
 int             mappages(pagetable_t, uint64, uint64, uint64, int);
@@ -184,6 +185,14 @@ pagetable_t ukvminit();
 void ukvmmap(pagetable_t ,uint64 va, uint64 pa, uint64 sz, int perm);
 void ukvmunmap(pagetable_t , uint64 va, uint64 npages);
 void ukfreewalk(pagetable_t );
+int pagetablecopy(pagetable_t old_pagetable, pagetable_t new_pagetable, uint64 begin, uint64 end);
+int  remappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm);
+void  uvmreunmap(pagetable_t pagetable, uint64 va, uint64 npages);
+
+//vmcopyin.c
+int  copyin_new(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len);
+int  copyinstr_new(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max);
+
 
 // plic.c
 void            plicinit(void);
