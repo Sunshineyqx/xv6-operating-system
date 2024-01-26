@@ -127,6 +127,11 @@ found:
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
 
+  //陷阱实验
+  p->interval = 0;
+  p->handler = 0;
+  p->ticks = 0;
+  p->copytrapframe = 0; //之后和trapframe共用一个物理页面
   return p;
 }
 

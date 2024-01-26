@@ -76,6 +76,14 @@ usertrap(void)
   if(p->killed)
     exit(-1);
 
+//处理计时器中断
+  if(which_dev == 2){
+      if(p->interval >0 && ++p->ticks == p->interval){
+        p->copytrapframe = p->trapframe + 512;
+        memmove(p->copytrapframe, p->trapframe, sizeof(struct trapframe));
+        p->trapframe->epc = p->handler;
+    }
+  }
   // give up the CPU if this is a timer interrupt.
   if(which_dev == 2)
     yield();
