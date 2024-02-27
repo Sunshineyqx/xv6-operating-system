@@ -1,0 +1,15 @@
+{
+    "configurations": [
+        {
+            "name": "Linux",
+            "includePath": [
+                "/kernel/**",
+                "/user/**"
+            ],
+            "defines": [],
+            "intelliSenseMode": "${default}",
+            "compilerPath": "/usr/bin/gcc"
+        }
+    ],
+    "version": 4
+}
