@@ -5,7 +5,7 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
-
+#include "fcntl.h"
 struct cpu cpus[NCPU];
 
 struct proc proc[NPROC];
@@ -298,6 +298,15 @@ fork(void)
 
   safestrcpy(np->name, p->name, sizeof(p->name));
 
+  //拷贝父进程的vmas
+  for(int i = 0; i < MAX_VMA; i++){
+    np->vmas[i].valid = 0;
+    struct vma* vma = &p->vmas[i];
+    if(vma->valid){
+      memmove(&np->vmas[i], vma, sizeof(struct vma));
+      filedup(vma->f);
+    }
+  }
   pid = np->pid;
 
   np->state = RUNNABLE;
@@ -352,9 +361,21 @@ exit(int status)
       p->ofile[fd] = 0;
     }
   }
+  //close all vmas
+  for(int i = 0; i < MAX_VMA; i++){
+    struct vma * vma = &p->vmas[i];
+    if(vma->valid == 1){
+      if(vma->flags & MAP_SHARED){
+        filewrite(vma->f, vma->begin_addr, vma->length);
+      }
+      fileclose(vma->f);
+      uvmunmap(p->pagetable, vma->begin_addr, vma->length/PGSIZE, 1);
+      vma->valid = 0;
+    }
+  }
 
   begin_op();
-  iput(p->cwd);
+    iput(p->cwd); 
   end_op();
   p->cwd = 0;
 

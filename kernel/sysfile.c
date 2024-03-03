@@ -484,3 +484,100 @@ sys_pipe(void)
   }
   return 0;
 }
+
+
+uint64
+sys_mmap(void){
+  uint64 begin_addr;
+  int length, prot, flags, fd, offset;
+  struct file* f;
+  struct proc* p = myproc();
+  //解析参数
+  if((argaddr(0, &begin_addr) < 0) || (argint(1, &length) < 0) || (argint(2, &prot) <0) ||(argint(3, &flags) < 0) || (argfd(4, &fd, &f) < 0) || argint(5, &offset) < 0){
+    return -1;
+  }
+
+//安全检查
+length = PGROUNDUP(length);
+if(p->sz + length >= MAXVA){
+  return -1;
+}
+if(!f->readable && (prot & PROT_READ)){
+  return -1;
+}
+if(!f->writable && (prot & PROT_WRITE) && (flags & MAP_SHARED)){
+  return -1;
+}
+
+//找到一个进程的空vma槽并且填充
+for(int i = 0; i < MAX_VMA; i++){
+  struct vma* vma = &p->vmas[i];
+  if(vma->valid == 0) {
+    vma->valid = 1;
+    vma->begin_addr = p->sz;
+    vma->length = length;
+    vma->prot = prot;
+    vma->flags = flags;
+    vma->fd = fd;
+    vma->f = f;
+    vma->file_offset = offset;
+    filedup(f);
+    p->sz += length;
+    return vma->begin_addr; //ok
+  }
+}
+//没有空闲vma
+return -1;
+}
+
+
+uint64
+sys_munmap(void) {
+  uint64 addr;
+  int length;
+  if (argaddr(0, &addr) < 0 || argint(1, &length) < 0)
+    return -1;
+  struct proc *p = myproc();
+  struct vma* vma = 0;
+  int idx = -1;
+  // find the corresponding vma
+  for (int i = 0; i < MAX_VMA; i++) {
+    if (p->vmas[i].valid && addr >= p->vmas[i].begin_addr && addr <= p->vmas[i].begin_addr + p->vmas[i].length) {
+      idx = i;
+      vma = &p->vmas[i];
+      break;
+    }
+  }
+  if (idx == -1)
+    // not in a valid VMA
+    return -1;
+
+  addr = PGROUNDDOWN(addr);
+  length = PGROUNDUP(length);
+  if (vma->flags & MAP_SHARED) {
+    // write back 将区域复写回文件
+    if (filewrite(vma->f, addr, length) < 0) {
+      printf("munmap: filewrite < 0\n");
+    }
+  }
+// 删除虚拟内存映射并释放物理页
+  uvmunmap(p->pagetable, addr, length/PGSIZE, 1); 
+
+  // change the mmap parameter
+  if (addr == vma->begin_addr && length == vma->length) {
+    // fully unmapped 完全释放
+    fileclose(vma->f);
+    vma->valid = 0;
+  } else if (addr == vma->begin_addr) {
+    // cover the beginning 释放区域包括头部
+    vma->begin_addr += length;
+    vma->length -= length;
+    vma->file_offset += length;
+  } else if ((addr + length) == (vma->begin_addr + vma->length)) {
+    // cover the end 释放区域包括尾部
+    vma->length -= length;
+  } else {
+    panic("munmap neither cover beginning or end of mapped region");
+  }
+  return 0;
+}

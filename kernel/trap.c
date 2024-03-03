@@ -5,6 +5,18 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
+#include "fcntl.h"
+
+struct file {
+  enum { FD_NONE, FD_PIPE, FD_INODE, FD_DEVICE } type;
+  int ref; // reference count
+  char readable;
+  char writable;
+  struct pipe *pipe; // FD_PIPE
+  struct inode *ip;  // FD_INODE and FD_DEVICE
+  uint off;          // FD_INODE
+  short major;       // FD_DEVICE
+};
 
 struct spinlock tickslock;
 uint ticks;
@@ -50,7 +62,52 @@ usertrap(void)
   // save user program counter.
   p->trapframe->epc = r_sepc();
   
-  if(r_scause() == 8){
+  if(r_scause() == 13 || r_scause() == 15){
+    uint64 va = r_stval();
+    struct proc* p = myproc();
+    if (va > MAXVA || va > p->sz) {
+      // sanity check安全检查
+      p->killed = 1;
+    } else {
+      int found = 0;
+      for (int i = 0; i < MAX_VMA; i++) {
+        struct vma* vma = &p->vmas[i];
+        if (vma->valid && va >= vma->begin_addr && va < vma->begin_addr+vma->length) {
+          // 找到对应的vma, 分配一个新的4096字节的物理页
+          // 并把对应的文件内容读进这个页, 插入进程的虚拟内存映射表
+          va = PGROUNDDOWN(va);
+          uint64 pa = (uint64)kalloc();
+          if (pa == 0) {
+            break;
+          }
+          memset((void *)pa, 0, PGSIZE);
+          ilock(vma->f->ip);
+          if(readi(vma->f->ip, 0, pa, vma->file_offset + va - vma->begin_addr, PGSIZE) < 0) {
+            iunlock(vma->f->ip);
+            break;
+          }
+          iunlock(vma->f->ip);
+          int perm = PTE_U; // 权限设置
+          if (vma->prot & PROT_READ)
+            perm |= PTE_R;
+          if (vma->prot & PROT_WRITE)
+            perm |= PTE_W;
+          if (vma->prot & PROT_EXEC)
+            perm |= PTE_X;
+          if (mappages(p->pagetable, va, PGSIZE, pa, perm) < 0) {
+            kfree((void*)pa);
+            break;
+          }
+          found = 1;
+          break;
+        }
+      }
+
+      if (!found)
+        p->killed = 1;
+    }
+  }
+  else if(r_scause() == 8){
     // system call
 
     if(p->killed)

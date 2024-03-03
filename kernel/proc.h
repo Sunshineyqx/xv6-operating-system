@@ -1,3 +1,17 @@
+#define MAX_VMA 16
+
+//虚拟内存区域
+struct vma{
+  int valid;
+  uint64 begin_addr;
+  int length;
+  int prot;
+  int flags;
+  int fd;
+  struct file* f;
+  int file_offset;
+};
+
 // Saved registers for kernel context switches.
 struct context {
   uint64 ra;
@@ -103,4 +117,5 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+  struct vma vmas[MAX_VMA]; //虚拟内存区域
 };
